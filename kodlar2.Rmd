@@ -1,0 +1,265 @@
+---
+title: "R ekosisteminde metin madenciliği nasıl yapılır?"
+output: html_notebook
+---
+
+Veri gazeteciliği süreçlerinde sayılar kadar metinler de niceliksel analizin bir parçası olarak kullanılıyor.Çünkü metin de ürettiğimiz, kullandığımız ve paylaştığımız bir veri. Özellikle siyasilerin konuşmaları, bir twitter etiketi içinde paylaşılan tweetler veyahut devletin bir kurumu tarafından yayınlanan bir rapor gazeteciler tarafından metin madenciliği sayesinde habercilik amaçları için kullanılabiliyor. Bu saydıklarıma örnek olarak Trump'ın sinirli tweetlerini Android cihazından paylaştığını, Cumhuriyetçilerin ve Demokratları söylemleri gösterebiliriz. 
+
+Metin madenciliğini veri madenciliğinin bir alt başlığı olarak tanımlamak yanlış olmaz. Yapılan işlem normalde analiz edilemeyen yapılandırılmamış büyük metin bloglarınının belirli komputasyonel yöntemlerle analiz edilmesi, anlamlandırılması ve metin verisinden belirli temalar, trendler, ilişkiler elde edilmesidir.
+
+Metin madenciliği geniş bir alan. Python ve R gibi araçlarla gelişmiş analizler ve çalışmalar yapılabiliyor. Daha çok metin madenciliğine giriş niteliğine sahip olacak bu yazıda R ekosisteminde metin verileri nasıl analiz edilebileceğini ve görselleştirileceğini anlatacağım.
+
+R'da farklı formatlardeki metinler analiz edilebiliyor. Bu ister html, ister word veya pdf formatında olsun R'ın sahip olduğu kütüphaneler bu analizi mümkün kılıyor. Bu uygulamada 3 ayrı formattaki metin verilerini anlamlandırmaya çalışağız: tweet verisi, bir sayfadaki html verisi ve bir düz metin (txt) dosyasındaki metin verileri. R ile bu metinlerde sıklıkla kullanılan ifadeleri ortaya çıkaracağız. 
+
+
+#### Hazırlık
+```{r message=FALSE, warning=FALSE}
+#paketleri aktif hale getirmeden önce lütfen yükleyin (install.packages("paket ismi"))
+
+library("tidytext") #metin verilerini bu paketle analiz edeceğiz
+library("tidyverse") #dplyr, ggplot2, tidyr gibi paketleri barındırıyor
+library("rtweet") #tweetleri çekmek için kullanacağız.
+library("rvest")
+library("wordcloud2") #kelime bulutu görseli için
+library("stopwords")
+```
+
+
+#### **Düz Metin Verisisini R'a aktaralım**
+
+```{r}
+nh <- read_lines("C:/Users/Sadettin/Desktop/nh.txt")
+head(nh)
+```
+
+
+```{r}
+tail(nh)
+```
+
+```{r}
+nh_tidy <- paste0(nh, collapse = " ")
+
+nh_tablo <- tibble(nh_tidy)
+
+str(nh_tablo)
+```
+
+Nazım Hikmet'in Şiiri aşağıda analiz edilecektir.
+
+
+#### **1. Trump'ın Tweetleri**
+
+```{r}
+trumptweets<-readRDS("C:/Users/Sadettin/Rstats/metin-maden/trumptweets.rds")
+```
+
+
+Sadece tweet metinlerini filtreleyerek bir kenara alalım
+
+```{r}
+trump <- trumptweets %>% select(5)
+
+head(trump)
+```
+
+Öncelikle tweetlerde kullanılan herhangi kesme işareti ve linkleri kaldırdık. Hemen sonrasında bu veri tweet verisi olduğu için token olarak "tweets" argumanını seçiyoruz. Bu sayede tweetlerdeki etiket ve @ ifadelerini kaldırmamış oluyoruz. Hemen sonrasında unnest_token komutu ile uzun tweetleri her satır bir kelimeye gelecek şekilde parçalara ayırıyoruz. Ayırdığımız kelimeleri de gereksiz ifadelerden kurtarıyoruz. Son adım ise bir reqex komutu sadece kelimelerden oluşan ifadeleri filtrelememiziz sağlıyor.
+
+```{r}
+
+trumptidy <- trump %>%
+  filter(!str_detect(text, '^"')) %>%
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", ""))%>%
+  unnest_tokens(word, text) %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]"))
+```
+
+```{r}
+head(trumptidy)
+```
+
+
+Sıklıkla kullanılan kelimlere göz atalım
+
+```{r}
+trumptidy %>% count(word, sort = TRUE)
+```
+
+
+Tekrar oranına göz atalım 
+
+```{r}
+tekrar_oran <- trumptidy %>% count(word, sort = TRUE) %>%  mutate(tekrar = n/sum(n)*100)
+
+```
+
+```{r}
+tekrar_oran
+```
+
+
+#### **N-gram ile sık kullanılan söz öbeklerini inceleyelim**
+
+Bir diğer analiz ise arka arkaya gelen birden fazla ifadenin ne sıklıkla kullanıldığını bulabiliriz. Buna metin madenciliğinde *n-gram* yöntemi adı veriliyor.
+
+Bu kısımda en önemli nokta unnest_tokens komutu içinde **tokeni** ngrams olarak değiştiriyoruz ve **n**'i 2'ye sabitliyoruz çünkü birbirini takip eden iki ayrı ifadeden oluşan söz öbeklerini elde etmek istiyoruz. Eğer dilersek bu değeri **3**'e çıkarıp daha fazla öbekten oluşan ifadelere de ulaşabiliriz. Bu analiz yöntemi tweetlerde, siyasilerin konuşmalarında, basın açıklamalarında, kitaplarda vb. metinlerde tekrar eden metinsel bir örüntü yakalamamızı sağlıyor. 
+
+```{r}
+
+trump_bigrams <- trump %>%
+  filter(!str_detect(text, '^"')) %>%
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+```
+
+```{r}
+head(trump_bigrams)
+```
+
+
+Hemen count() komutu ile sıklıkla kullanılan ifadelere göz atalım
+
+```{r}
+trump_bigrams %>% count(bigram, sort = TRUE)
+```
+
+Görüldüğü üzere iki ayrı kelimenin birlikte kullanılma sayısı tek bir kelimeye göre daha az. Şimdi bu ifadelerdeki gereksiz kelimeleri (stopwords) veri setinden def edelim. Bunun için öncekinden daha karmaşık bir yöntem kullancacağız. Öncekine nazaran iki ifadeden oluşan ilk sütunu her biri bir kelimeden oluşacak şekilde ikiye ayırıp her sütunu ayrı ayrı temizleyeceğiz. Veri temizleme işlemi sonrası sütunları birleştirip gereksiz ifadelerden arınmış bigram sutunun tekrar hesaplayacağız. 
+
+O halde öncelikle bigram sütununu ikiye ayıralım
+
+```{r}
+trump_bigrams_tidy <-  trump_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>% #**ayırma**
+  filter(!word1 %in% stop_words$word) %>% #temizleme aşaması 1
+  filter(!word2 %in% stop_words$word) %>% #temizleme aşaması 2 
+  unite(bigram, word1, word2, sep = " ")%>% #birleştirme
+  count(bigram, sort = TRUE)
+
+```
+
+```{r}
+
+trump_bigrams_tidy
+```
+
+**Nazım Hikmet'in Şiirini İnceleyelim**
+
+
+```{r}
+nh_veri <- nh_tablo %>%
+  filter(!str_detect(nh_tidy, '^"')) %>%
+  unnest_tokens(word, nh_tidy) %>%
+  filter(!word %in% stopwords(language = "tr",source ="stopwords-iso"))
+
+nh_veri
+```
+
+
+```{r}
+nh_veri %>% count(word, sort = TRUE)
+```
+
+
+#### **Metin Verilerinin Görselleştirilmesi**
+
+Elimizdeki metin verilerileri en basit haliyle çubuk grafik veyahut kelime bulutu olarak görselleştirebiliriz. 
+
+ggplot2 temayı oluşturalım
+
+```{r}
+#grafiklerde kullanacağımız fontu belirledik
+windowsFonts("Proxima Nova" = windowsFont("Proxima Nova"))
+
+theme_custom2 <- function() {
+  theme_minimal() +
+    theme(
+      text = element_text(family = "Proxima Nova", color = "gray25"),
+      plot.title = element_text(face = "bold",size = 14),
+      plot.subtitle = element_text(size = 13),
+      axis.text.x= element_blank(),
+      axis.text.y = element_text(size=11),
+      plot.caption = element_text(size = 11, color = "gray30"),
+      plot.background = element_rect(fill = "#f6f5f5"),
+      legend.position = "none",
+      strip.background = element_rect(colour = "#d9d9d9", fill = "#d9d9d9"),
+      strip.text.x = element_text(size = 11, colour = "gray25", face = "bold"))
+  
+}
+```
+
+Her iki veri setinde de en çok kullanılan 20 ifadeyi filtreleyelim.
+
+```{r}
+trump_bigrams_yeni<- trump_bigrams_tidy %>% 
+  filter(!bigram %in% c("president realdonaldtrump","president trump")) %>% 
+  top_n(20,n)
+trump_tidy_yeni <- trump_tidy_count %>% top_n(20,n) 
+
+```
+
+
+Görselleştirme
+```{r}
+renk <- c("söz_öbek"="",
+          "kelime"="")
+
+
+trump_tidy_yeni %>% ggplot(aes(fct_reorder(word, n),n, fill ="red"))+
+  geom_col()+
+  coord_flip()+
+  geom_text(aes(x = word, y = n,label = n),check_overlap = TRUE, hjust = -0.2,size = 3.7,color= "gray25")+
+  labs(x="",y="",
+       title = "Trump'ın Sık Kullandığı İfadeler",
+       subtitle = "Son 3 bin Tweet Analize Dahil Edilmiştir.",
+       caption = "@demirelsadettin")+theme_custom2()
+```
+
+Söz Öbeklerş
+
+```{r}
+values ="#3182bd"
+
+trump_bigrams_yeni %>% ggplot(aes(fct_reorder(bigram, n),n, fill =values))+
+  geom_col()+
+  coord_flip()+ scale_fill_manual(values = "#3182bd")+
+  geom_text(aes(x = bigram, y = n,label = n),check_overlap = TRUE, hjust = -0.2,size = 3.8,color= "gray25")+
+  labs(x="",y="",
+       title = "Trump'ın Sık Kullandığı Söz Öbekleri",
+       subtitle = "Son 3 bin Tweet Analize Dahil Edilmiştir.",
+       caption = "@demirelsadettin")+theme_custom2()
+```
+
+
+
+**Wordcloud2 paketi ile gelişmiş kelime bulutu**
+
+```{r}
+library(wordcloud2)
+
+trump_tidy_count<- count(trumptidy,word, sort = TRUE) %>% filter(!word%in% c("president","trump","realdonaldtrump"))
+
+trump_tidy_count
+```
+
+```{r}
+wordcloud2(data = trump_tidy_count,color = "random-light", backgroundColor = "grey25",size =0.6)
+```
+
+Daha hoş bir kelime bulutu oluşturalım
+
+```{r}
+wordcloud2(data = trump_tidy_count,minRotation = -pi/6, maxRotation = -pi/6,
+  rotateRatio = 1, size = 0.7)
+```
+
+
+```{r}
+trump_wordcloud <- trump_bigrams_tidy %>% filter(!bigram %in% c("president realdonaldtrump","president trump"))
+
+wordcloud2(data = trump_wordcloud,minRotation = -pi/6, maxRotation = -pi/6,
+  rotateRatio = 1, size = 0.7)
+```
+
+
